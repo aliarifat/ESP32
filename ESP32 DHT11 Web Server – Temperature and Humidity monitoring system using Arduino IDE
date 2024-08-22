@@ -1,0 +1,148 @@
+#include "DHT.h"
+#include <WiFi.h>
+#define DHTPIN 2     
+#define DHTTYPE DHT11   
+
+DHT dht(DHTPIN, DHTTYPE);
+
+const char* ssid = "Your SSID ";
+const char* password = "Your wifi password";
+
+
+WiFiServer server(80);
+
+// Variable to store the HTTP request
+String header;
+
+// Assign output variables to GPIO pins
+const int sensorPin = 2;     
+
+// Current time
+unsigned long currentTime = millis();
+// Previous time
+unsigned long previousTime = 0; 
+
+const long timeoutTime = 2000;
+
+void setup() {
+  dht.begin();
+
+  pinMode(sensorPin, INPUT);
+  Serial.begin(9600);
+  Serial.println(F("DHTxx test!"));
+
+
+ 
+  // Connect to Wi-Fi network with your SSID and password
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  server.begin();
+}
+void loop() {
+  // Wait a few seconds between measurements.
+  delay(2000);
+
+
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+  float f = dht.readTemperature(true);
+
+  if (isnan(f) || isnan(t) || isnan(h)) {
+    Serial.println(F("Failed to read from DHT sensor!"));
+   
+    return;
+  }
+
+  float hif = dht.computeHeatIndex(f, h);
+  float hic = dht.computeHeatIndex(t, h, false);
+
+  Serial.print(F("Humidity: "));
+  Serial.print(h);
+  Serial.print(F("%  Temperature: "));
+  Serial.print(t);
+  Serial.print(F("°C "));
+  Serial.print(f);
+  Serial.print(F("°F  Heat index: "));
+  Serial.print(hic);
+  Serial.print(F("°C "));
+  Serial.print(hif);
+  Serial.println(F("°F"));
+  Serial.println(WiFi.localIP());
+
+  WiFiClient client = server.available();
+
+  if (client) {
+    currentTime = millis();
+    previousTime = currentTime;
+    Serial.println("New Client.");
+    String currentLine = "";
+    while (client.connected() && currentTime - previousTime <= timeoutTime) {
+      currentTime = millis();
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+        header += c;
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+
+           
+
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html; charset=UTF-8");
+            client.println("Connection: close");
+            client.println();
+
+            client.println("<!DOCTYPE html><html>");
+            client.println("<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+            client.println("<link rel=\"icon\" href=\"data:,\">");
+            client.println("<meta http-equiv=\"refresh\" content=\"1\">");
+            client.println("<link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css\">");
+            client.println("<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}");
+            client.println("text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer; }");
+          
+            client.println(".humidity-icon { color: blue; }");
+             client.println(".temp-icon { color: red; }");
+
+          
+            client.println(".humidity-icon { color: blue; }");
+             
+            client.println("</style>");
+            client.println("</head>");
+            client.println("<body><h1>Temperature monitoring system</h1>");
+            client.println("<body><h2>See the DHT11 data here</h2>");
+              
+            client.println("<p><i class=\"fas fa-thermometer-half temp-icon\"></i> Temperature: ");
+            client.println(t);
+            client.print("°C</p>");
+            
+            client.println("<p><i class=\"fas fa-tint humidity-icon\"></i> Humidity: ");
+            client.println(h);
+            client.print(" %</p>");
+            client.println("</body></html>");
+            client.println();
+              
+            break;
+          } else {
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+    header = "";
+    client.stop();
+    Serial.println("Client disconnected.");
+    Serial.println("");
+  }
+}
