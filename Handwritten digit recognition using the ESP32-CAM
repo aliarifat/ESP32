@@ -1,0 +1,65 @@
+ESP32 code : https://github.com/aliarifat/ESP32/blob/main/ESP32-CAM%20HTTP%20JPEG%20Streaming%20Server%20code
+Following is the Python code: 
+import cv2
+import numpy as np
+import urllib.request
+
+# ESP32-CAM URL (make sure it's accessible on your network)
+CAM_URL = "http://192.168.1.105/cam-hi.jpg"
+
+# Load training data from digits.png
+digits_img = cv2.imread("digits.png", cv2.IMREAD_GRAYSCALE)
+cells = [np.hsplit(row, 100) for row in np.vsplit(digits_img, 50)]
+x = np.array(cells)
+train = x[:, :50].reshape(-1, 400).astype(np.float32)
+train_labels = np.repeat(np.arange(10), 250)[:, np.newaxis]
+
+# Train kNN
+knn = cv2.ml.KNearest_create()
+knn.train(train, cv2.ml.ROW_SAMPLE, train_labels)
+
+def get_image_from_esp32():
+    try:
+        resp = urllib.request.urlopen(CAM_URL)
+        img_array = np.asarray(bytearray(resp.read()), dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        return img
+    except:
+        print("Failed to retrieve image from ESP32-CAM.")
+        return None
+
+while True:
+    frame = get_image_from_esp32()
+    if frame is None:
+        continue
+
+    # Display frame with crop box
+    display = frame.copy()
+    cv2.rectangle(display, (160, 90), (460, 390), (0, 255, 0), 2)
+
+    cv2.putText(display, "Draw digit inside green box", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+    cv2.imshow("ESP32-CAM Digit Recognition", display)
+
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        break
+    elif key == ord('s'):
+        # Crop ROI from the ESP32-CAM frame
+        roi = frame[90:390, 160:460]
+
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        _, thresh = cv2.threshold(blur, 100, 255, cv2.THRESH_BINARY_INV)
+
+        resized = cv2.resize(thresh, (20, 20))
+        flat = resized.reshape(1, 400).astype(np.float32)
+
+        # Predict digit
+        _, result, _, _ = knn.findNearest(flat, k=5)
+        predicted_digit = int(result[0][0])
+        print(f"Predicted Digit: {predicted_digit}")
+
+        cv2.imshow("Processed ROI", thresh)
+
+cv2.destroyAllWindows()
